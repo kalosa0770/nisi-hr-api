@@ -17,7 +17,7 @@ const allowedOrigins = [
   'http://localhost:5173', // Local Vite development
   'http://localhost:3000', // Alternative local port
   'https://nissi-hr.vercel.app', // Example production frontend (Update this later)
-  'https://www.nissihr.com'      // Your official domain
+  'https://www.nisihr.com'      // Your official domain
 ];
 
 const corsOptions = {
