@@ -5,7 +5,7 @@
 
 const PAYROLL_CONFIG = {
   NAPSA_RATE: 0.05,
-  NAPSA_MAX_CEILING: 1600.00, // Configured for national cap limits
+  NAPSA_MAX_CEILING: 1861.80, // Configured for national cap limits
   NHIMA_RATE: 0.01,
   // ZRA Monthly Progressive Tax Brackets
   ZRA_BANDS: [
