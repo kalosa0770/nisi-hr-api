@@ -35,10 +35,10 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // 2. Prevent Duplicate Identity Records (NRC, TPIN, Emails must be unique)
+    // 2. Prevent Duplicate Identity Records (Using exact trim/case-insensitive parameters)
     const existingEmployee = await Employee.findOne({
       $or: [
-        { email: email.toLowerCase() },
+        { email: { $regex: new RegExp(`^${email.trim()}$`, "i") } },
         { nrcNumber: nrcNumber.trim() },
         { zraTpin: zraTpin.trim() }
       ]
@@ -55,24 +55,25 @@ router.post("/", async (req, res) => {
     let finalEmployeeId = employeeId;
     if (!finalEmployeeId) {
       const count = await Employee.countDocuments();
-      // Generates a streamlined sequencing tag (e.g., MHR-0011)
       finalEmployeeId = `MHR-${String(count + 1).padStart(3, "0")}`;
+    } else {
+      finalEmployeeId = finalEmployeeId.trim().toUpperCase();
     }
 
     // 4. Instantiate and Save the New Record Node
     const newEmployee = new Employee({
       employeeId: finalEmployeeId,
-      firstName,
-      lastName,
-      email,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.toLowerCase().trim(),
       phone,
       jobTitle,
       department,
       joiningDate: joiningDate || new Date(),
-      nrcNumber,
-      zraTpin,
-      napsaNumber,
-      nhimaNumber,
+      nrcNumber: nrcNumber.trim(),
+      zraTpin: zraTpin.trim(),
+      napsaNumber: napsaNumber.trim(),
+      nhimaNumber: nhimaNumber.trim(),
       bankDetails,
       compensation: {
         basicSalary: compensation?.basicSalary || 0,
@@ -89,7 +90,7 @@ router.post("/", async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Employee successfully registered in Misi HR systems.",
+      message: "Employee successfully registered in Nissi HR systems.",
       data: savedEmployee
     });
 
@@ -103,13 +104,60 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Quick GET route helper to match the fetch request inside your EmployeesContent frontend component
+// =========================================================
+// ROUTE:   GET /api/employees
+// DESC:    Retrieve all active database personnel nodes
+// =========================================================
 router.get("/", async (req, res) => {
   try {
     const employees = await Employee.find().sort({ createdAt: -1 });
     res.status(200).json(employees);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// =========================================================
+// ROUTE:   GET /api/employees/:employeeId
+// DESC:    Sync worker profile context by Custom String Identifier
+// AXIOS:   Matches the exact row layout link in your UI Drawer
+// =========================================================
+router.get("/:employeeId", async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: "Employee ID parameter is required." });
+    }
+
+    const cleanId = employeeId.trim();
+
+    // Try finding by custom tracking string string (case-insensitive) OR standard MongoDB hex ObjectId
+    const employee = await Employee.findOne({
+      $or: [
+        { employeeId: { $regex: new RegExp(`^${cleanId}$`, "i") } },
+        // Safely check ObjectId only if cleanId matches standard 24-character hex format
+        ...(cleanId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: cleanId }] : [])
+      ]
+    });
+
+    if (!employee) {
+      console.log(`[Lookup Fail] No employee node matches token: "${cleanId}"`);
+      return res.status(404).json({ 
+        success: false, 
+        message: `Identity Sync Error: Worker node "${cleanId}" not found in corporate registers.` 
+      });
+    }
+
+    // Explicitly return the raw object block to fulfill direct frontend state mappings
+    res.status(200).json(employee);
+  } catch (error) {
+    console.error("Error fetching individual identity node vectors:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Error fetching individual identity node vectors.", 
+      error: error.message 
+    });
   }
 });
 
