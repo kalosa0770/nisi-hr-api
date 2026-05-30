@@ -11,7 +11,6 @@ const EmployeeSchema = new mongoose.Schema(
       unique: true,
       trim: true,
       uppercase: true,
-      // Generates a unique serial number (e.g., MHR-001) if not input manually
     },
     firstName: {
       type: String,
@@ -53,6 +52,46 @@ const EmployeeSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+
+    // =========================================================
+    // ABSENCE ENGINE & LEAVE BALANCE WALLET
+    // =========================================================
+    leaveBalance: {
+      type: Number,
+      required: true,
+      default: 24, // Statutory standard baseline under Zambian law
+      min: [0, "Leave wallet balance cannot fall below zero units."]
+    },
+    leaveHistory: [
+      {
+        type: { 
+          type: String, 
+          required: true,
+          enum: [
+            'Annual Leave', 
+            'Sick Leave', 
+            'Maternity Leave', 
+            'Paternity Leave', 
+            'Compassionate Leave', 
+            'Unpaid Leave'
+          ]
+        },
+        startDate: { type: Date, required: true },
+        endDate: { type: Date, required: true },
+        calculatedDays: { type: Number, required: true },
+        reason: { type: String, trim: true },
+        status: { 
+          type: String, 
+          enum: ['Pending', 'Approved', 'Rejected'], 
+          default: 'Approved' // Direct manual logs commit as Approved immediately
+        },
+        isPayrollDeducted: {
+          type: Boolean,
+          default: false // Set to true if type === 'Unpaid Leave' to flag the payroll engine
+        },
+        loggedAt: { type: Date, default: Date.now }
+      }
+    ],
 
     // =========================================================
     // GOVERNMENT REGULATORY INDICES (Zambian Statutory Identifiers)
@@ -106,7 +145,6 @@ const EmployeeSchema = new mongoose.Schema(
         required: [true, "Base salary parameter is mandatory"],
         min: [0, "Salary cannot be a negative valuation"],
       },
-      // Allowances split by category for granular tax evaluation
       allowances: {
         housing: { type: Number, default: 0 },
         transport: { type: Number, default: 0 },
@@ -116,7 +154,9 @@ const EmployeeSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true, // Automatically manages createdAt and updatedAt indices
+    timestamps: true,
+    toJSON: { virtuals: true }, // Ensures virtual fields show up when calling res.json()
+    toObject: { virtuals: true }
   }
 );
 
@@ -125,5 +165,5 @@ EmployeeSchema.virtual("fullName").get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
-const Employee = mongoose.model("Employee", EmployeeSchema);
+const Employee = mongoose.models.Employee || mongoose.model("Employee", EmployeeSchema);
 export default Employee;

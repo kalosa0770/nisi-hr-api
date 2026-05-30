@@ -7,6 +7,7 @@ import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
 import employeeRoutes from "./routes/employees.js";
 import payrollRoutes from "./routes/payroll.js";
+import leaveRoutes from "./routes/leaves.js";
 import waitlistRoutes from './routes/waitlist.js';
 
 // 2. Database Connection
@@ -47,6 +48,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/payroll", payrollRoutes);
+app.use("/api/leaves", leaveRoutes);
 app.use('/api/waitlist', waitlistRoutes);
 
 // 5. Health Check
