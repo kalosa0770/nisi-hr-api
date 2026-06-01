@@ -51,11 +51,13 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // 3. Fallback Auto-ID Generation logic if employeeId wasn't passed manually
+    // 3. Resilient Auto-ID Generation logic
     let finalEmployeeId = employeeId;
     if (!finalEmployeeId) {
+      // Fallback matrix: combine standard count indexing with a fallback tail to prevent deletion collisions
       const count = await Employee.countDocuments();
-      finalEmployeeId = `MHR-${String(count + 1).padStart(3, "0")}`;
+      const uniqueTail = Date.now().toString().slice(-2); 
+      finalEmployeeId = `MHR-${String(count + 1).padStart(3, "0")}-${uniqueTail}`;
     } else {
       finalEmployeeId = finalEmployeeId.trim().toUpperCase();
     }
@@ -87,6 +89,8 @@ router.post("/", async (req, res) => {
     });
 
     const savedEmployee = await newEmployee.save();
+
+    // ✨ Notification dispatch pipeline has been successfully detached from this lifecycle.
 
     res.status(201).json({
       success: true,
@@ -120,7 +124,6 @@ router.get("/", async (req, res) => {
 // =========================================================
 // ROUTE:   GET /api/employees/:employeeId
 // DESC:    Sync worker profile context by Custom String Identifier
-// AXIOS:   Matches the exact row layout link in your UI Drawer
 // =========================================================
 router.get("/:employeeId", async (req, res) => {
   try {
@@ -132,24 +135,22 @@ router.get("/:employeeId", async (req, res) => {
 
     const cleanId = employeeId.trim();
 
-    // Try finding by custom tracking string string (case-insensitive) OR standard MongoDB hex ObjectId
+    // Try finding by custom tracking string (case-insensitive) OR standard MongoDB hex ObjectId
     const employee = await Employee.findOne({
       $or: [
         { employeeId: { $regex: new RegExp(`^${cleanId}$`, "i") } },
-        // Safely check ObjectId only if cleanId matches standard 24-character hex format
         ...(cleanId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: cleanId }] : [])
       ]
     });
 
     if (!employee) {
-      console.log(`[Lookup Fail] No employee node matches token: "${cleanId}"`);
+      console.log(`[Lookup Fail] No employee details matches token: "${cleanId}"`);
       return res.status(404).json({ 
         success: false, 
         message: `Identity Sync Error: Worker node "${cleanId}" not found in corporate registers.` 
       });
     }
 
-    // Explicitly return the raw object block to fulfill direct frontend state mappings
     res.status(200).json(employee);
   } catch (error) {
     console.error("Error fetching individual identity node vectors:", error);

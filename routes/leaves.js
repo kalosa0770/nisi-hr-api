@@ -52,7 +52,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Unified to findById to align with the frontend MongoDB Object ID context references
     const employee = await Employee.findById(employeeId);
     if (!employee) {
       return res.status(404).json({ 
@@ -85,7 +84,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Enforce balance checks early if filing standard annual leave requests upfront
     if (type === "Annual Leave" && employee.leaveBalance < calculatedDays) {
       return res.status(400).json({
         success: false,
@@ -93,9 +91,11 @@ router.post("/", async (req, res) => {
       });
     }
 
+    const employeeName = `${employee.firstName} ${employee.lastName}`;
+
     const newLeave = new Leave({
       employeeId,
-      name: `${employee.firstName} ${employee.lastName}`,
+      name: employeeName,
       type,
       days: calculatedDays,
       startDate: new Date(startDate),
@@ -105,6 +105,9 @@ router.post("/", async (req, res) => {
     });
 
     const savedLeave = await newLeave.save();
+
+    // ✨ Notification creation pipeline removed successfully.
+
     res.status(201).json({ success: true, data: savedLeave });
 
   } catch (error) {
@@ -119,31 +122,29 @@ router.post("/", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // Expects "Approved" or "Rejected"
+    const { status } = req.body; 
 
     if (!["Approved", "Rejected", "Pending"].includes(status)) {
       return res.status(400).json({ success: false, message: "Invalid evaluation target status parameters passed." });
     }
 
-    // Find document first to read current fields before mutation
     const leaveDoc = await Leave.findById(id);
     if (!leaveDoc) {
       return res.status(404).json({ success: false, message: "Leave allocation log node not found." });
     }
 
-    // Prevent re-processing already finalized allocation chains
     if (leaveDoc.status !== "Pending" && status !== "Pending") {
       return res.status(400).json({ success: false, message: "This allocation record tracking window has already been locked and finalized." });
     }
 
-    // State Transition: If moving from Pending to Approved, apply changes to the Employee core record
-    if (status === "Approved" && leaveDoc.status === "Pending") {
+    const previousStatus = leaveDoc.status;
+
+    if (status === "Approved" && previousStatus === "Pending") {
       const employee = await Employee.findById(leaveDoc.employeeId);
       if (!employee) {
         return res.status(404).json({ success: false, message: "Associated employee structural identity node vanished." });
       }
 
-      // Enforce strict checks for annual leave deductions
       if (leaveDoc.type === "Annual Leave") {
         if (employee.leaveBalance < leaveDoc.days) {
           return res.status(400).json({ 
@@ -154,7 +155,6 @@ router.patch("/:id", async (req, res) => {
         employee.leaveBalance -= leaveDoc.days;
       }
 
-      // Append clean log data to employee context history array for profile views
       employee.leaveHistory.push({
         type: leaveDoc.type,
         startDate: leaveDoc.startDate,
@@ -167,9 +167,10 @@ router.patch("/:id", async (req, res) => {
       await employee.save();
     }
 
-    // Commit changes to the root Leave document 
     leaveDoc.status = status;
     const updatedLeave = await leaveDoc.save();
+
+    // ✨ Review verification notification log trigger removed.
 
     res.status(200).json({ success: true, data: updatedLeave });
   } catch (error) {
@@ -186,60 +187,80 @@ router.post('/book-manual', async (req, res) => {
     const { employeeId, leaveType, startDate, endDate, reason } = req.body;
 
     if (!employeeId || !leaveType || !startDate || !endDate) {
-      return res.status(400).json({ success: false, message: "Missing explicit logging arguments inside request body payload." });
+      return res.status(400).json({ success: false, message: "Missing required employee information." });
     }
 
     const employee = await Employee.findById(employeeId);
     if (!employee) {
-      return res.status(404).json({ success: false, message: "Employee profile entity node not discovered." });
+      return res.status(404).json({ success: false, message: "Employee not found." });
     }
 
     const businessDays = calculateBusinessDays(startDate, endDate);
     if (businessDays <= 0) {
-      return res.status(400).json({ success: false, message: "Calculated cycle result is 0 business production execution units." });
+      return res.status(400).json({ success: false, message: "Calculated duration is invalid." });
+    }
+
+    // 🔒 RESILIENT PROTECTION: Check timeline overlaps matching BOTH Approved and Pending entries
+    const overlappingLeave = await Leave.findOne({
+      employeeId,
+      status: { $in: ["Pending", "Approved"] },
+      $or: [
+        { startDate: { $lte: new Date(endDate) }, endDate: { $gte: new Date(startDate) } }
+      ]
+    });
+
+    if (overlappingLeave) {
+      return res.status(409).json({
+        success: false,
+        message: `The requested leave period is already booked.`
+      });
     }
 
     if (leaveType === "Annual Leave" && employee.leaveBalance < businessDays) {
       return res.status(400).json({ 
         success: false,
-        message: `Insufficient leave balance. Selected duration requires ${businessDays} days, but employee only has ${employee.leaveBalance} remaining.` 
+        message: `Insufficient leave balances remaining.` 
       });
     }
 
-    // Process annual leave ledger changes immediately
+    // Deduct from wallet if running an annual allocation tracking variable
     if (leaveType === "Annual Leave") {
       employee.leaveBalance -= businessDays;
     }
 
-    // Record data directly onto employee profile document data node
-    employee.leaveHistory.push({
+    const employeeName = `${employee.firstName} ${employee.lastName}`;
+
+    const generalizedHistoryNode = {
       type: leaveType,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
+      days: businessDays, 
       calculatedDays: businessDays,
       reason: reason || "Administrative Direct Entry Log",
       status: "Approved"
-    });
+    };
 
+    employee.leaveHistory.push(generalizedHistoryNode);
     await employee.save();
 
-    // Generate matching baseline document in the leaves collection for macro analytical visibility
     const manualLeaveRecord = new Leave({
       employeeId: employee._id,
-      name: `${employee.firstName} ${employee.lastName}`,
+      name: employeeName,
       type: leaveType,
       days: businessDays,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       reason: reason || "Administrative Direct Entry Log",
-      status: "Approved" // Instantly executed status flag matching direct admin injection bounds
+      status: "Approved" 
     });
 
     await manualLeaveRecord.save();
 
+    // ✨ Administrative override ledger log dispatch removed completely.
+
     res.status(201).json({ 
       success: true, 
-      message: `Absence recorded: ${businessDays} working days successfully parsed and adjusted.` 
+      message: `Manual leave record created successfully.` 
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

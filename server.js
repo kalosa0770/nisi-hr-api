@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import employeeRoutes from "./routes/employees.js";
 import payrollRoutes from "./routes/payroll.js";
 import leaveRoutes from "./routes/leaves.js";
+import notificationRoutes from "./routes/notifications.js";
 import waitlistRoutes from './routes/waitlist.js';
 
 // 2. Database Connection
@@ -25,17 +26,15 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or Postman/Curl)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS policy'));
     }
   },
-  credentials: true, // Required for cookies/sessions later
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
@@ -49,6 +48,7 @@ app.use('/api/auth', authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/payroll", payrollRoutes);
 app.use("/api/leaves", leaveRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/waitlist', waitlistRoutes);
 
 // 5. Health Check

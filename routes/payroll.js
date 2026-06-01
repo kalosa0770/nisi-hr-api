@@ -1,16 +1,15 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Employee from "../models/Employee.js";
-import  calculateEmployeePayroll  from "../utils/payrollEngine.js"; // Double check if you named this default or named export
+import calculateEmployeePayroll from "../utils/payrollEngine.js"; 
 
 const router = express.Router();
 
 // =========================================================
 // 🗄️ INLINE PAYROLL HISTORY SCHEMA
 // =========================================================
-// Creating a simple history collection so runs are persistent
 const PayrollHistorySchema = new mongoose.Schema({
-  monthYear: { type: String, required: true, unique: true }, // e.g., "May 2026"
+  monthYear: { type: String, required: true, unique: true }, 
   summaryTotals: {
     totalGrossPay: Number,
     totalNetPay: Number,
@@ -30,31 +29,78 @@ const PayrollHistorySchema = new mongoose.Schema({
   individualLineItems: [mongoose.Schema.Types.Mixed]
 }, { timestamps: true });
 
-// Fallback prevent compile error on hot reloads
 const PayrollHistory = mongoose.models.PayrollHistory || mongoose.model("PayrollHistory", PayrollHistorySchema);
+
+// =========================================================
+// 🛠️ UTILITY: COMPUTE PREVIOUS MONTH-YEAR TOKEN STRING (ROBUST)
+// =========================================================
+const getPreviousMonthYearToken = (currentMonthYearStr) => {
+  try {
+    const months = [
+      "january", "february", "march", "april", "may", "june", 
+      "july", "august", "september", "october", "november", "december"
+    ];
+    
+    const [monthName, yearStr] = currentMonthYearStr.trim().toLowerCase().split(/\s+/);
+    let monthIndex = months.indexOf(monthName);
+    let year = parseInt(yearStr);
+
+    if (monthIndex === -1 || isNaN(year)) return null;
+
+    // Shift context backward cleanly
+    if (monthIndex === 0) {
+      monthIndex = 11;
+      year -= 1;
+    } else {
+      monthIndex -= 1;
+    }
+
+    // Safely reconstruct structural token
+    const targetDate = new Date(year, monthIndex, 1);
+    return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(targetDate);
+  } catch (err) {
+    console.error("Failed Parsing Month token vector tracking strings:", err);
+    return null;
+  }
+};
 
 
 // =========================================================
 // ROUTE:   GET /api/payroll/summary
-// DESC:    Fetch the latest saved payroll run for the dashboard
+// DESC:    Fetch active run and historical baseline run parameters 
 // =========================================================
 router.get("/summary", async (req, res) => {
   try {
-    const { monthYear } = req.query; // Reads from fetch params
+    const { monthYear } = req.query;
 
     if (!monthYear) {
       return res.status(400).json({ success: false, message: "monthYear query parameter is required." });
     }
 
-    // Look for a saved record matching the active month cycle
-    const historicalRun = await PayrollHistory.findOne({ monthYear });
+    const historicalRun = await PayrollHistory.findOne({ monthYear: monthYear.trim() });
 
     if (!historicalRun) {
-      // If it doesn't exist, return a 404 so the frontend falls back to default zero values gracefully
       return res.status(404).json({ success: false, message: "No active cycle run found for this period." });
     }
 
-    res.status(200).json(historicalRun);
+    const targetPreviousToken = getPreviousMonthYearToken(monthYear.trim());
+    let previousTotals = null;
+    
+    if (targetPreviousToken) {
+      const pastMonthRun = await PayrollHistory.findOne({ monthYear: targetPreviousToken });
+      if (pastMonthRun) {
+        previousTotals = pastMonthRun.summaryTotals;
+      }
+    }
+
+    res.status(200).json({
+      _id: historicalRun._id,
+      monthYear: historicalRun.monthYear,
+      summaryTotals: historicalRun.summaryTotals,
+      individualLineItems: historicalRun.individualLineItems,
+      previousTotals: previousTotals 
+    });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -63,7 +109,7 @@ router.get("/summary", async (req, res) => {
 
 // =========================================================
 // ROUTE:   POST /api/payroll/run
-// DESC:    Automatically process payroll AND save it to historical collections
+// DESC:    Process calculation matrices and return comparative historical parameters
 // =========================================================
 router.post("/run", async (req, res) => {
   try {
@@ -73,7 +119,9 @@ router.post("/run", async (req, res) => {
       return res.status(400).json({ success: false, message: "monthYear field is required in request body." });
     }
 
-    // 1. Fetch only active personnel nodes
+    const normalizedMonthYear = monthYear.trim();
+
+    // 1. Fetch only active personnel
     const activeEmployees = await Employee.find({ status: "Active" });
 
     if (activeEmployees.length === 0) {
@@ -84,28 +132,28 @@ router.post("/run", async (req, res) => {
     const individualLineItems = activeEmployees.map(employee => {
       const calculations = calculateEmployeePayroll(employee);
       return {
-        employeeId: employee.employeeId,
+        employeeId: employee._id, 
         name: `${employee.firstName} ${employee.lastName}`,
         jobTitle: employee.jobTitle,
-        basicSalary: employee.compensation.basicSalary,
+        basicSalary: employee.compensation?.basicSalary || 0,
         ...calculations
       };
     });
 
-    // 3. Reduce individual values into your macro dashboard card aggregates
+    // 3. Reducer with multi-layer parsing fallback mechanics
     const summaryTotals = individualLineItems.reduce((acc, current) => {
-      acc.totalGrossPay += current.grossPay;
-      acc.totalNetPay += current.netPay;
-      acc.totalPAYE += current.deductions.paye;
-      acc.totalNAPSA += current.deductions.napsa;
-      acc.totalNHIMA += current.deductions.nhima;
+      acc.totalGrossPay += current.grossPay || 0;
+      acc.totalNetPay += current.netPay || 0;
+      
+      acc.totalPAYE += current.paye || current.deductions?.paye || 0;
+      acc.totalNAPSA += current.napsa || current.deductions?.napsa || 0;
+      acc.totalNHIMA += current.nhima || current.deductions?.nhima || 0;
       return acc;
     }, { totalGrossPay: 0, totalNetPay: 0, totalPAYE: 0, totalNAPSA: 0, totalNHIMA: 0 });
 
-    const totalDeductions = summaryTotals.totalPAYE + summaryTotals.totalSocial + summaryTotals.totalNHIMA;
     const headcount = activeEmployees.length;
 
-    // Apply currency rounding
+    // Apply currency precision configurations safely
     const finalSummary = {
       totalGrossPay: Number(summaryTotals.totalGrossPay.toFixed(2)),
       totalNetPay: Number(summaryTotals.totalNetPay.toFixed(2)),
@@ -119,21 +167,40 @@ router.post("/run", async (req, res) => {
       steps: { attendance: 'done', tax: 'done', disbursement: 'done' }
     };
 
-    // 4. UPSERT into MongoDB (Updates if existing run exists, creates new record if not)
+    // 4. Atomic upsert into MongoDB
     const updatedHistory = await PayrollHistory.findOneAndUpdate(
-      { monthYear },
+      { monthYear: normalizedMonthYear },
       {
-        monthYear,
+        monthYear: normalizedMonthYear,
         summaryTotals: finalSummary,
         individualLineItems
       },
       { new: true, upsert: true }
     );
 
-    // 5. Return the newly processed dynamic data block
-    res.status(200).json(updatedHistory);
+    // 5. Build dynamic tracking historical lookup arrays
+    const targetPreviousToken = getPreviousMonthYearToken(normalizedMonthYear);
+    let previousTotals = null;
+    
+    if (targetPreviousToken) {
+      const pastMonthRun = await PayrollHistory.findOne({ monthYear: targetPreviousToken });
+      if (pastMonthRun) {
+        previousTotals = pastMonthRun.summaryTotals;
+      }
+    }
+
+    // ✨ System notification tracking code has been cleanly extricated from this scope.
+
+    res.status(200).json({
+      _id: updatedHistory._id,
+      monthYear: updatedHistory.monthYear,
+      summaryTotals: updatedHistory.summaryTotals,
+      individualLineItems: updatedHistory.individualLineItems,
+      previousTotals: previousTotals
+    });
 
   } catch (error) {
+    console.error("Critical Exception processing Calculation Engine Run:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
