@@ -27,27 +27,49 @@ const PayrollHistorySchema = new mongoose.Schema({
     }
   },
   individualLineItems: [mongoose.Schema.Types.Mixed]
+  
 }, { timestamps: true });
 
 const PayrollHistory = mongoose.models.PayrollHistory || mongoose.model("PayrollHistory", PayrollHistorySchema);
+PayrollHistorySchema.index({ createdAt: -1 });
 
+// =========================================================
+// 🛠️ UTILITY: COMPUTE PREVIOUS MONTH-YEAR TOKEN STRING (ROBUST)
+// =========================================================
 // =========================================================
 // 🛠️ UTILITY: COMPUTE PREVIOUS MONTH-YEAR TOKEN STRING (ROBUST)
 // =========================================================
 const getPreviousMonthYearToken = (currentMonthYearStr) => {
   try {
-    const months = [
-      "january", "february", "march", "april", "may", "june", 
-      "july", "august", "september", "october", "november", "december"
-    ];
+    if (!currentMonthYearStr) return null;
     
-    const [monthName, yearStr] = currentMonthYearStr.trim().toLowerCase().split(/\s+/);
-    let monthIndex = months.indexOf(monthName);
-    let year = parseInt(yearStr);
+    const input = currentMonthYearStr.trim().toLowerCase();
+    let monthIndex = -1;
+    let year = NaN;
 
-    if (monthIndex === -1 || isNaN(year)) return null;
+    // Route 1: Handle ISO formatting shapes from input fields (e.g., "2026-05")
+    if (input.includes('-')) {
+      const [yearStr, monthStr] = input.split('-');
+      year = parseInt(yearStr);
+      // ISO months are 1-indexed, convert to 0-indexed array structures
+      monthIndex = parseInt(monthStr) - 1; 
+    } 
+    // Route 2: Handle fallback lexical parameters (e.g., "may 2026")
+    else {
+      const months = [
+        "january", "february", "march", "april", "may", "june", 
+        "july", "august", "september", "october", "november", "december"
+      ];
+      const parts = input.split(/\s+/);
+      if (parts.length < 2) return null;
+      
+      monthIndex = months.indexOf(parts[0]);
+      year = parseInt(parts[1]);
+    }
 
-    // Shift context backward cleanly
+    if (monthIndex < 0 || monthIndex > 11 || isNaN(year)) return null;
+
+    // Shift context backward cleanly across year barriers
     if (monthIndex === 0) {
       monthIndex = 11;
       year -= 1;
@@ -55,7 +77,7 @@ const getPreviousMonthYearToken = (currentMonthYearStr) => {
       monthIndex -= 1;
     }
 
-    // Safely reconstruct structural token
+    // Safely reconstruct structural token (always returns clean "Month Year" format for lookup fields)
     const targetDate = new Date(year, monthIndex, 1);
     return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(targetDate);
   } catch (err) {
@@ -63,6 +85,7 @@ const getPreviousMonthYearToken = (currentMonthYearStr) => {
     return null;
   }
 };
+
 
 
 // =========================================================
